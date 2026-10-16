@@ -1,0 +1,9 @@
+{
+    "defaults":
+    {
+        "run-as": "package"
+    },
+    "username": "vtoolbox",
+    "groupname": "vtoolbox",
+    "join-groups": ["video", "render"]
+}

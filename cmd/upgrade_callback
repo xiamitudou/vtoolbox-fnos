@@ -1,0 +1,11 @@
+#!/bin/bash
+# vtoolbox upgrade_callback: 升级后重新启动服务
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="${TRIM_APPDEST:-$(cd "${CMD_DIR}/.." && pwd)/target}"
+
+chmod +x "${APP_DIR}/bin/ffmpeg" "${APP_DIR}/bin/ffprobe" 2>/dev/null
+chmod -R a+rX "${APP_DIR}/server" "${APP_DIR}/www" 2>/dev/null
+
+"${CMD_DIR}/main" start >/dev/null 2>&1
+exit 0

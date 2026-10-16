@@ -1,0 +1,53 @@
+[
+    {
+        "stepTitle": "处理偏好",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "以下设置安装后可在「应用设置」中随时修改；视频目录的读写权限请在「应用设置 → 授权目录」中授予。"
+            },
+            {
+                "type": "radio",
+                "field": "wizard_trim_mode",
+                "label": "删除片头的默认模式",
+                "initValue": "accurate",
+                "options": [
+                    { "label": "精准（推荐）：切点精确到帧，仅重编码片头数秒", "value": "accurate" },
+                    { "label": "快速：纯复制，秒级完成，但可能残留数秒画面", "value": "fast" }
+                ]
+            },
+            {
+                "type": "select",
+                "field": "wizard_concurrency",
+                "label": "同时处理的视频数量",
+                "initValue": "1",
+                "options": [
+                    { "label": "1（推荐，对磁盘最友好）", "value": "1" },
+                    { "label": "2", "value": "2" },
+                    { "label": "3", "value": "3" }
+                ]
+            },
+            {
+                "type": "radio",
+                "field": "wizard_on_exists",
+                "label": "输出文件已存在时",
+                "initValue": "rename",
+                "options": [
+                    { "label": "自动加序号（推荐）", "value": "rename" },
+                    { "label": "跳过", "value": "skip" },
+                    { "label": "直接覆盖", "value": "overwrite" }
+                ]
+            },
+            {
+                "type": "radio",
+                "field": "wizard_hwaccel",
+                "label": "核显硬件加速",
+                "initValue": "off",
+                "options": [
+                    { "label": "关闭（推荐先用它跑通，兼容性最好）", "value": "off" },
+                    { "label": "自动：检测到 Intel/AMD 核显时使用，失败自动回退软件编码", "value": "auto" }
+                ]
+            }
+        ]
+    }
+]

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视频工具箱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">VT</span>
+    <div>
+      <h1>视频工具箱</h1>
+      <p id="subtitle">正在加载…</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="badge" id="ffmpegBadge">ffmpeg 检测中</span>
+    <span class="badge" id="taskBadge">任务 0</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="work">工作台</button>
+  <button class="tab" data-tab="tasks">任务 <span class="pill" id="tabCount">0</span></button>
+  <button class="tab" data-tab="settings">设置</button>
+</nav>
+
+<main>
+  <section class="view active" id="view-work">
+    <div class="layout">
+      <div class="panel picker">
+        <div class="panel-head">
+          <h2>选择视频</h2>
+          <div class="head-actions">
+            <button class="btn ghost small" id="btnUp" title="返回上级">↑ 上级</button>
+            <button class="btn ghost small" id="btnScan">递归扫描</button>
+            <button class="btn ghost small" id="btnSelectAllVideos">全选本页</button>
+            <button class="btn ghost small" id="btnCoverGroup">按封面分组</button>
+            <button class="btn ghost small" id="btnClearPicked">清空已选</button>
+          </div>
+        </div>
+        <div class="roots-bar" id="rootsBar"></div>
+        <div class="crumbs" id="crumbs"></div>
+        <div class="filter-row">
+          <input type="search" id="filterInput" placeholder="按文件名过滤…">
+          <label class="check"><input type="checkbox" id="onlyVideo"> 仅视频</label>
+          <label class="check hidden" id="onlyDupLabel"><input type="checkbox" id="onlyDup" checked> 只看封面相同的分组</label>
+        </div>
+        <div class="table-wrap" id="browseWrap">
+          <div class="empty">正在读取授权目录…</div>
+        </div>
+      </div>
+
+      <aside class="panel side">
+        <div class="mode-switch">
+          <button class="mode active" data-mode="trim">删除片头/片尾</button>
+          <button class="mode" data-mode="merge">合并视频</button>
+        </div>
+
+        <div class="mode-body" id="modeTrim">
+          <label class="field">
+            <span>删除范围</span>
+            <select id="trimTarget">
+              <option value="head">只删片头</option>
+              <option value="tail">只删片尾</option>
+              <option value="both">片头 + 片尾都删</option>
+            </select>
+          </label>
+
+          <label class="field" id="headField">
+            <span>片头时长</span>
+            <input type="text" id="headInput" value="00:01:00" placeholder="00:01:00 或 90">
+          </label>
+          <div class="chips" id="headChips">
+            <button class="chip" data-sec="15">15 秒</button>
+            <button class="chip" data-sec="30">30 秒</button>
+            <button class="chip" data-sec="60">1 分钟</button>
+            <button class="chip" data-sec="90">1 分 30 秒</button>
+            <button class="chip" data-sec="300">5 分钟</button>
+          </div>
+          <p class="hint" id="headHint">解析为 60.00 秒</p>
+
+          <label class="field hidden" id="tailField">
+            <span>片尾时长</span>
+            <input type="text" id="tailInput" value="00:00:30" placeholder="00:00:30 或 30">
+          </label>
+          <div class="chips hidden" id="tailChips">
+            <button class="chip" data-sec="15">15 秒</button>
+            <button class="chip" data-sec="30">30 秒</button>
+            <button class="chip" data-sec="45">45 秒</button>
+            <button class="chip" data-sec="60">1 分钟</button>
+            <button class="chip" data-sec="90">1 分 30 秒</button>
+          </div>
+          <p class="hint hidden" id="tailHint">解析为 30.00 秒</p>
+
+          <label class="field">
+            <span>切割方式</span>
+            <select id="trimMode">
+              <option value="accurate">精准（推荐）· 切点精确到帧，仅重编码片头数秒</option>
+              <option value="fast">快速 · 纯复制，秒级完成，可能残留数秒画面</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>文件名后缀</span>
+            <input type="text" id="nameSuffix" value="_已删片头">
+          </label>
+        </div>
+
+        <div class="mode-body hidden" id="modeMerge">
+          <label class="field">
+            <span>合并后文件名</span>
+            <input type="text" id="mergeName" placeholder="留空则自动命名">
+          </label>
+          <label class="field">
+            <span>合并方式</span>
+            <select id="mergeMode">
+              <option value="auto">自动（参数一致时直接拼，不一致则重新编码）</option>
+              <option value="copy">直接拼接 · 参数不一致时按分组方式分别合并</option>
+              <option value="reencode">标准合并 · 统一分辨率/帧率后重新编码</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>分组方式</span>
+            <select id="mergeGroup">
+              <option value="params">按参数（编码/分辨率/帧率完全一致才合并）</option>
+              <option value="resolution">按分辨率（画面像素尺寸相同才合并）</option>
+              <option value="orientation">按横竖屏（横屏归横屏，竖屏归竖屏）</option>
+            </select>
+          </label>
+
+          <label class="field hidden" id="orientationRatioField">
+            <span>横竖屏比例容差（%）</span>
+            <input type="number" id="orientationRatio" min="0" max="100" step="1" value="5">
+          </label>
+          <p class="hint" id="mergeGroupHint">参数完全一致的文件才会合并到同一个视频里。</p>
+
+          <label class="field">
+            <span>合并后处理源视频</span>
+            <select id="mergePostAction">
+              <option value="keep">保留不动（推荐）</option>
+              <option value="move">移动到「已合并视频」文件夹</option>
+              <option value="delete">删除源视频（不可恢复）</option>
+            </select>
+          </label>
+          <p class="hint" id="mergePostHint">合并完成后不改动源视频。</p>
+          <div class="chips">
+            <button class="chip" id="btnMergeAnalyze">分析参数分组</button>
+          </div>
+          <div class="order-box hidden" id="mergeGroupBox">
+            <div class="order-head">
+              <span id="mergeGroupTitle">参数分组</span>
+              <button class="btn ghost small" id="btnMergeGroupClear">收起</button>
+            </div>
+            <div class="group-preview" id="mergeGroupList"></div>
+          </div>
+          <div class="order-box">
+            <div class="order-head">
+              <span>合并顺序</span>
+              <div>
+                <button class="btn ghost small" id="btnSortName">按文件名</button>
+                <button class="btn ghost small" id="btnReverse">反转</button>
+              </div>
+            </div>
+            <ol class="order-list" id="orderList">
+              <li class="empty-small">从左侧勾选两个以上视频后在此排序</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="side-foot">
+          <label class="field">
+            <span>输出目录</span>
+            <input type="text" id="outputDir" placeholder="选择授权目录">
+          </label>
+          <div class="chips">
+            <button class="chip" id="btnUseCurrent">用当前目录</button>
+            <button class="chip" id="btnUseDefault">用默认目录</button>
+          </div>
+          <label class="field">
+            <span>输出格式</span>
+            <select id="outputExt">
+              <option value="">跟随源文件</option>
+              <option value="mp4">MP4</option>
+              <option value="mkv">MKV</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>同名文件</span>
+            <select id="onExists">
+              <option value="">跟随全局设置</option>
+              <option value="rename">自动加序号</option>
+              <option value="skip">跳过</option>
+              <option value="overwrite">直接覆盖</option>
+            </select>
+          </label>
+
+          <div class="picked-summary" id="pickedSummary">已选 0 个文件</div>
+          <button class="btn primary block" id="btnStart">开始处理</button>
+          <p class="hint">处理过程不修改原文件，全部输出到指定目录。</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="view" id="view-tasks">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>任务队列</h2>
+        <div class="head-actions">
+          <button class="btn ghost small" id="btnClearDone">清理已结束任务</button>
+        </div>
+      </div>
+      <div class="jobs" id="jobsWrap"><div class="empty">暂无任务</div></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-settings">
+    <div class="panel narrow">
+      <div class="panel-head"><h2>处理设置</h2></div>
+      <div class="settings">
+        <label class="field">
+          <span>默认切割方式</span>
+          <select id="cfgTrimMode">
+            <option value="accurate">精准（推荐）</option>
+            <option value="fast">快速</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>输出位置默认值</span>
+          <select id="cfgOutputMode">
+            <option value="default">默认输出目录（共享目录 vtoolbox/output）</option>
+            <option value="current">当前所在目录（输出到视频同目录）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>同时处理的任务数</span>
+          <select id="cfgConcurrency">
+            <option value="1">1（推荐）</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>同名输出文件</span>
+          <select id="cfgOnExists">
+            <option value="rename">自动加序号</option>
+            <option value="skip">跳过</option>
+            <option value="overwrite">直接覆盖</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>画质（CRF，数值越小越清晰）</span>
+          <input type="number" id="cfgCrf" min="10" max="35" step="1">
+        </label>
+        <label class="field">
+          <span>编码速度</span>
+          <select id="cfgPreset">
+            <option value="veryfast">veryfast（推荐）</option>
+            <option value="fast">fast</option>
+            <option value="medium">medium（更小体积）</option>
+            <option value="slow">slow（最慢最好）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>核显硬件加速</span>
+          <select id="cfgHwaccel">
+            <option value="off">关闭（用包内静态 ffmpeg）</option>
+            <option value="auto">自动 · 可用时用核显（Intel/AMD）</option>
+          </select>
+        </label>
+        <p class="hint" id="hwHint"></p>
+        <button class="btn primary" id="btnSaveConfig">保存设置</button>
+        <p class="hint" id="saveHint"></p>
+      </div>
+
+      <div class="panel-head"><h2>运行环境</h2></div>
+      <ul class="env-list" id="envList"></ul>
+      <p class="hint">视频目录读写权限请在飞牛「应用设置 → 授权目录」中授予，授权后回到本页刷新即可看到。</p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

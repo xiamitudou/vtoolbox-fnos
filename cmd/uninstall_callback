@@ -1,0 +1,10 @@
+#!/bin/bash
+# vtoolbox uninstall_callback: 清理残留进程（运行数据保留在 var 目录，便于重装后恢复）
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+VAR_DIR="${TRIM_PKGVAR:-$(cd "${CMD_DIR}/.." && pwd)/var}"
+
+pkill -f "vtoolbox/target/server/main.py" >/dev/null 2>&1
+rm -f "${VAR_DIR}/server.pid" 2>/dev/null
+
+exit 0

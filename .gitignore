@@ -1,0 +1,18 @@
+# 内置静态二进制（约 152MB，入仓无意义，构建时自动下载）
+app/bin/ffmpeg
+app/bin/ffprobe
+
+# 构建中间产物
+build/cache/
+build/stage/
+build/tmp/
+build/*.log
+
+# 产物：只发布当前版本的主包与降级包，其余忽略
+dist/*
+!dist/vtoolbox-1.0.7.fpk
+!dist/vtoolbox-1.0.7-cpu.fpk
+vtoolbox.fpk
+
+__pycache__/
+*.pyc

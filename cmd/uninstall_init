@@ -1,0 +1,6 @@
+#!/bin/bash
+# vtoolbox uninstall_init: 卸载前停止服务
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+"${CMD_DIR}/main" stop >/dev/null 2>&1
+exit 0

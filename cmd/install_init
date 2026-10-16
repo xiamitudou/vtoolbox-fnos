@@ -1,0 +1,58 @@
+#!/bin/bash
+# vtoolbox install_init: 安装前检查
+#
+# 重要：本脚本在「应用文件落盘之前」执行，此时 ${TRIM_APPDEST} 下尚无任何文件。
+# 因此这里绝对不能检查 bin/ffmpeg、server/main.py 等包内文件，否则会误报
+# 「应用文件不完整」。文件完整性校验请放在 install_callback（安装后执行）。
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "${CMD_DIR}/.." && pwd)"
+
+fail() {
+    echo "$1" >&2
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        echo "$1" > "${TRIM_TEMP_LOGFILE}"
+    fi
+    exit 1
+}
+
+# 1) 运行环境：需要系统自带 python3（fnOS 自带 /usr/bin/python3）
+PY=""
+if [ -x /usr/bin/python3 ]; then
+    PY="/usr/bin/python3"
+else
+    PY="$(command -v python3 2>/dev/null)"
+fi
+
+if [ -z "${PY}" ]; then
+    fail "系统缺少 python3，无法运行视频工具箱。请先在 fnOS 上确认 /usr/bin/python3 可用。"
+fi
+
+PY_VER="$("${PY}" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null)"
+PY_MAJOR="${PY_VER%%.*}"
+if [ -z "${PY_MAJOR}" ] || [ "${PY_MAJOR}" -lt 3 ] 2>/dev/null; then
+    fail "python3 版本过低（检测到 ${PY_VER:-未知}），视频工具箱需要 Python 3.8 及以上。"
+fi
+
+# 2) 磁盘空间：包内自带约 160MB 的 ffmpeg/ffprobe，解压后还要留出运行余量
+for CHECK_DIR in "${APP_ROOT}" "${TRIM_APPDEST_VOL:-}" "${TRIM_PKGVAR:-}"; do
+    [ -n "${CHECK_DIR}" ] || continue
+    [ -d "${CHECK_DIR}" ] || continue
+    AVAIL_KB="$(df -Pk "${CHECK_DIR}" 2>/dev/null | awk 'NR==2{print $4}')"
+    case "${AVAIL_KB}" in
+    '' | *[!0-9]*) continue ;;
+    esac
+    if [ "${AVAIL_KB}" -lt 524288 ]; then
+        fail "安装空间不足：需要至少 512MB 可用空间（自带 ffmpeg 约 160MB），当前 $((${AVAIL_KB} / 1024))MB。"
+    fi
+    break
+done
+
+# 3) 端口占用：仅提示，不阻断（服务端口可由用户在应用设置里调整）
+if [ -n "${service_port:-}" ]; then
+    if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ":${service_port}[[:space:]]"; then
+        echo "提示：端口 ${service_port} 当前已被占用，安装后请在「应用设置」中改用其他端口。" >&2
+    fi
+fi
+
+exit 0

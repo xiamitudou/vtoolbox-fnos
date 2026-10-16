@@ -1,0 +1,163 @@
+#!/bin/bash
+# vtoolbox install_callback: 安装文件落盘后执行 —— 文件完整性校验 + 初始化配置
+#
+# 说明：飞牛的 install_init 在文件落盘前执行，install_callback 在文件落盘后执行，
+# 因此所有「包内文件是否齐全」的校验都必须放在这里。
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "${CMD_DIR}/.." && pwd)"
+
+APP_DIR="${TRIM_APPDEST:-${APP_ROOT}/target}"
+VAR_DIR="${TRIM_PKGVAR:-${APP_ROOT}/var}"
+ETC_DIR="${TRIM_PKGETC:-${APP_ROOT}/etc}"
+TMP_DIR="${TRIM_PKGTMP:-${APP_ROOT}/tmp}"
+HOME_DIR="${TRIM_PKGHOME:-${APP_ROOT}/home}"
+
+fail() {
+    echo "$1" >&2
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        echo "$1" > "${TRIM_TEMP_LOGFILE}"
+    fi
+    exit 1
+}
+
+mkdir -p "${VAR_DIR}" "${ETC_DIR}" "${TMP_DIR}" "${HOME_DIR}" 2>/dev/null
+
+# ---------- 1) 可执行权限兜底 ----------
+# 部分解包方式会丢失可执行位，这里统一补回来
+chmod +x "${APP_DIR}/bin/ffmpeg" "${APP_DIR}/bin/ffprobe" 2>/dev/null
+chmod -R a+rX "${APP_DIR}/server" "${APP_DIR}/www" "${APP_DIR}/ui" 2>/dev/null
+
+# ---------- 1.5) 统一网关 socket 目录可写性 ----------
+# 官方契约：gatewaySocket 只写文件名，服务在 ${TRIM_APPDEST} 下创建它；
+# 运行用户（package）必须能写该目录，否则公网 / 桌面网关访问会打不开（白屏）。
+RUN_USER="${TRIM_RUN_USERNAME:-}"
+SOCK_PROBE="${APP_DIR}/.socktest.$$"
+
+sock_writable() {
+    if [ -z "${RUN_USER}" ] || [ "${RUN_USER}" = "root" ]; then
+        ( : > "${SOCK_PROBE}" ) 2>/dev/null
+    elif command -v runuser >/dev/null 2>&1; then
+        runuser -u "${RUN_USER}" -- sh -c ': > "$1"' sh "${SOCK_PROBE}" 2>/dev/null
+    elif command -v su >/dev/null 2>&1; then
+        su -s /bin/sh -c ": > '${SOCK_PROBE}'" "${RUN_USER}" 2>/dev/null
+    else
+        ( : > "${SOCK_PROBE}" ) 2>/dev/null
+    fi
+}
+
+SOCK_NOTE="可写"
+if [ -d "${APP_DIR}" ]; then
+    if sock_writable; then
+        :
+    else
+        chmod 0777 "${APP_DIR}" 2>/dev/null
+        if sock_writable; then
+            SOCK_NOTE="原不可写，已放宽目录权限"
+        else
+            SOCK_NOTE="不可写（网关访问可能不可用，请检查 ${APP_DIR} 权限）"
+        fi
+    fi
+    rm -f "${SOCK_PROBE}" 2>/dev/null
+else
+    SOCK_NOTE="目录不存在"
+fi
+
+# ---------- 2) 文件完整性校验 ----------
+ERR=""
+
+if [ ! -f "${APP_DIR}/server/main.py" ]; then
+    ERR="应用文件不完整：缺少 server/main.py（请重新下载安装包后重试）"
+fi
+
+if [ -z "${ERR}" ] && [ ! -f "${APP_DIR}/www/index.html" ]; then
+    ERR="应用文件不完整：缺少 Web 界面文件 www/index.html（请重新下载安装包后重试）"
+fi
+
+# 内置 ffmpeg 缺失时不直接失败：优先回退到系统 ffmpeg，并在日志里说明
+SYSTEM_FFMPEG=""
+if [ ! -x "${APP_DIR}/bin/ffmpeg" ]; then
+    for CAND in /usr/trim/lib/mediasrv/ffmpeg /usr/bin/ffmpeg /usr/local/bin/ffmpeg; do
+        if [ -x "${CAND}" ]; then
+            SYSTEM_FFMPEG="${CAND}"
+            break
+        fi
+    done
+    if [ -z "${SYSTEM_FFMPEG}" ] && [ -z "${ERR}" ]; then
+        ERR="应用文件不完整：缺少内置 ffmpeg（包内 bin/ffmpeg 未找到，且系统无可用 ffmpeg）"
+    fi
+fi
+
+if [ -n "${ERR}" ]; then
+    fail "${ERR}"
+fi
+
+# ---------- 3) 写默认配置（保留已有配置，不覆盖用户改动） ----------
+case "${wizard_trim_mode:-accurate}" in
+accurate | fast) TRIM_MODE="${wizard_trim_mode}" ;;
+*) TRIM_MODE="accurate" ;;
+esac
+
+case "${wizard_concurrency:-1}" in
+1 | 2 | 3) CONCURRENCY="${wizard_concurrency}" ;;
+*) CONCURRENCY="1" ;;
+esac
+
+case "${wizard_on_exists:-rename}" in
+rename | skip | overwrite) ON_EXISTS="${wizard_on_exists}" ;;
+*) ON_EXISTS="rename" ;;
+esac
+
+case "${wizard_hwaccel:-off}" in
+off | auto) HWACCEL="${wizard_hwaccel}" ;;
+*) HWACCEL="off" ;;
+esac
+
+CONF_FILE="${ETC_DIR}/config.json"
+if [ ! -f "${CONF_FILE}" ]; then
+    cat > "${CONF_FILE}" <<EOF
+{
+    "trim_mode": "${TRIM_MODE}",
+    "concurrency": ${CONCURRENCY},
+    "on_exists": "${ON_EXISTS}",
+    "crf": 20,
+    "preset": "veryfast",
+    "hwaccel": "${HWACCEL}",
+    "allow_roots": []
+}
+EOF
+fi
+
+# ---------- 4) 安装日志（便于排障） ----------
+DRI_NOTE="未发现 /dev/dri"
+for D in /dev/dri/renderD128 /dev/dri/renderD* /dev/dri/card0; do
+    if [ -e "${D}" ]; then
+        if [ -r "${D}" ] && [ -w "${D}" ]; then
+            DRI_NOTE="${D} 可读写"
+        elif [ -r "${D}" ]; then
+            DRI_NOTE="${D} 可读（核显加速可用）"
+        else
+            DRI_NOTE="${D} 无权限（需 video/render 组）"
+        fi
+        break
+    fi
+done
+
+{
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] install_callback"
+    echo "  APP_DIR     = ${APP_DIR}"
+    echo "  VAR_DIR     = ${VAR_DIR}"
+    echo "  ETC_DIR     = ${ETC_DIR}"
+    echo "  builtin ffmpeg = $(ls -l "${APP_DIR}/bin/ffmpeg" 2>/dev/null || echo '缺失')"
+    echo "  system  ffmpeg = ${SYSTEM_FFMPEG:-未使用}"
+    echo "  运行用户     = ${TRIM_RUN_USERNAME:-未知}（应用用户 ${TRIM_USERNAME:-未知}）"
+    echo "  核显设备     = ${DRI_NOTE}"
+    echo "  硬件加速     = ${HWACCEL}"
+    echo "  网关 socket  = ${APP_DIR}/vtoolbox.sock（${SOCK_NOTE}）"
+} >> "${VAR_DIR}/install.log" 2>/dev/null
+
+if [ -n "${SYSTEM_FFMPEG}" ]; then
+    echo "提示：未找到内置 ffmpeg，将回退使用系统 ffmpeg（${SYSTEM_FFMPEG}）。" >&2
+fi
+
+exit 0

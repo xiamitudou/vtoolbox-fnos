@@ -1,0 +1,4 @@
+#!/bin/bash
+# vtoolbox config_init: 应用设置变更前
+
+exit 0

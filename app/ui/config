@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "vtoolbox.Application": {
+            "title": "视频工具箱",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "url": "/app/vtoolbox",
+            "allUsers": false,
+            "gatewaySocket": "vtoolbox.sock",
+            "gatewayPrefix": "/app/vtoolbox"
+        }
+    }
+}

@@ -1,0 +1,72 @@
+#!/bin/bash
+# vtoolbox config_callback: 应用设置变更后，重写运行时配置
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "${CMD_DIR}/.." && pwd)"
+APP_DIR="${TRIM_APPDEST:-${APP_ROOT}/target}"
+VAR_DIR="${TRIM_PKGVAR:-${APP_ROOT}/var}"
+ETC_DIR="${TRIM_PKGETC:-${APP_ROOT}/etc}"
+
+mkdir -p "${ETC_DIR}" 2>/dev/null
+
+CONF_FILE="${ETC_DIR}/config.json"
+
+conf_trim_mode="accurate"
+conf_concurrency="1"
+conf_on_exists="rename"
+conf_crf="20"
+conf_preset="veryfast"
+conf_hwaccel="off"
+conf_allow_roots="[]"
+
+if [ -r "${CONF_FILE}" ]; then
+    old_trim_mode="$(grep -o '"trim_mode"[[:space:]]*:[[:space:]]*"[a-z]*"' "${CONF_FILE}" 2>/dev/null | grep -o '"[a-z]*"$' | tr -d '"')"
+    old_concurrency="$(grep -o '"concurrency"[[:space:]]*:[[:space:]]*[0-9]*' "${CONF_FILE}" 2>/dev/null | grep -o '[0-9]*$')"
+    old_on_exists="$(grep -o '"on_exists"[[:space:]]*:[[:space:]]*"[a-z]*"' "${CONF_FILE}" 2>/dev/null | grep -o '"[a-z]*"$' | tr -d '"')"
+    old_crf="$(grep -o '"crf"[[:space:]]*:[[:space:]]*[0-9]*' "${CONF_FILE}" 2>/dev/null | grep -o '[0-9]*$')"
+    old_preset="$(grep -o '"preset"[[:space:]]*:[[:space:]]*"[a-z]*"' "${CONF_FILE}" 2>/dev/null | grep -o '"[a-z]*"$' | tr -d '"')"
+    old_hwaccel="$(grep -o '"hwaccel"[[:space:]]*:[[:space:]]*"[a-z]*"' "${CONF_FILE}" 2>/dev/null | grep -o '"[a-z]*"$' | tr -d '"')"
+    # allow_roots 由应用自身维护，这里必须原样保留，否则用户手动添加的目录会被清空
+    old_allow_roots="$(grep -o '"allow_roots"[[:space:]]*:[[:space:]]*\[[^]]*\]' "${CONF_FILE}" 2>/dev/null | sed 's/^[^[]*//')"
+    [ -n "${old_trim_mode}" ] && conf_trim_mode="${old_trim_mode}"
+    [ -n "${old_concurrency}" ] && conf_concurrency="${old_concurrency}"
+    [ -n "${old_on_exists}" ] && conf_on_exists="${old_on_exists}"
+    [ -n "${old_crf}" ] && conf_crf="${old_crf}"
+    [ -n "${old_preset}" ] && conf_preset="${old_preset}"
+    [ -n "${old_hwaccel}" ] && conf_hwaccel="${old_hwaccel}"
+    [ -n "${old_allow_roots}" ] && conf_allow_roots="${old_allow_roots}"
+fi
+
+case "${wizard_trim_mode:-}" in
+accurate | fast) conf_trim_mode="${wizard_trim_mode}" ;;
+esac
+
+case "${wizard_concurrency:-}" in
+1 | 2 | 3) conf_concurrency="${wizard_concurrency}" ;;
+esac
+
+case "${wizard_on_exists:-}" in
+rename | skip | overwrite) conf_on_exists="${wizard_on_exists}" ;;
+esac
+
+case "${wizard_hwaccel:-}" in
+off | auto) conf_hwaccel="${wizard_hwaccel}" ;;
+esac
+
+cat > "${CONF_FILE}" <<EOF
+{
+    "trim_mode": "${conf_trim_mode}",
+    "concurrency": ${conf_concurrency},
+    "on_exists": "${conf_on_exists}",
+    "crf": ${conf_crf},
+    "preset": "${conf_preset}",
+    "hwaccel": "${conf_hwaccel}",
+    "allow_roots": ${conf_allow_roots}
+}
+EOF
+
+# 配置变更后重启服务，使并发数等参数立即生效
+"${CMD_DIR}/main" stop >/dev/null 2>&1
+"${CMD_DIR}/main" start >/dev/null 2>&1
+
+exit 0

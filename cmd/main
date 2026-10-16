@@ -1,0 +1,203 @@
+#!/bin/bash
+# vtoolbox (视频工具箱) lifecycle script
+# usage: main start | stop | status
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "${CMD_DIR}/.." && pwd)"
+
+APP_DIR="${TRIM_APPDEST:-${APP_ROOT}/target}"
+VAR_DIR="${TRIM_PKGVAR:-${APP_ROOT}/var}"
+ETC_DIR="${TRIM_PKGETC:-${APP_ROOT}/etc}"
+TMP_DIR="${TRIM_PKGTMP:-${APP_ROOT}/tmp}"
+
+LOG_FILE="${VAR_DIR}/server.log"
+PID_FILE="${VAR_DIR}/server.pid"
+# 统一网关 Unix Socket：官方契约要求服务在 ${TRIM_APPDEST} 下创建它，
+# 文件名必须与 app/ui/config 的 gatewaySocket 一致。
+SOCK_FILE="${TRIM_APPDEST:-${APP_ROOT}/target}/vtoolbox.sock"
+# 默认 5230（与 manifest.service_port 保持一致）；
+# 允许用 VTOOLBOX_PORT 覆盖，便于排查端口冲突或做离线测试。
+PORT="${VTOOLBOX_PORT:-5230}"
+
+mkdir -p "${VAR_DIR}" "${TMP_DIR}" 2>/dev/null
+
+find_python() {
+    if [ -x "${APP_DIR}/python/bin/python3" ]; then
+        echo "${APP_DIR}/python/bin/python3"
+        return 0
+    fi
+    if [ -x /usr/bin/python3 ]; then
+        echo "/usr/bin/python3"
+        return 0
+    fi
+    local p
+    p="$(command -v python3 2>/dev/null)"
+    if [ -n "${p}" ]; then
+        echo "${p}"
+        return 0
+    fi
+    echo ""
+}
+
+current_pid() {
+    if [ -r "${PID_FILE}" ]; then
+        head -n 1 "${PID_FILE}" 2>/dev/null | tr -d '[:space:]'
+    fi
+}
+
+is_running() {
+    local pid
+    pid="$(current_pid)"
+    if [ -z "${pid}" ]; then
+        return 1
+    fi
+    if kill -0 "${pid}" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+find_ffmpeg() {
+    # 顺序与后端一致：内置 → 系统内置服务版 → PATH
+    if [ -x "${APP_DIR}/bin/ffmpeg" ]; then
+        echo "${APP_DIR}/bin/ffmpeg"
+        return 0
+    fi
+    local c
+    for c in /usr/trim/lib/mediasrv/ffmpeg /usr/bin/ffmpeg /usr/local/bin/ffmpeg; do
+        if [ -x "${c}" ]; then
+            echo "${c}"
+            return 0
+        fi
+    done
+    c="$(command -v ffmpeg 2>/dev/null)"
+    if [ -n "${c}" ]; then
+        echo "${c}"
+        return 0
+    fi
+    echo ""
+}
+
+start_app() {
+    # 干跑：只打印将要执行的命令（供离线测试直接以子进程方式启动同一条命令行，
+    # 绕开沙箱对 nohup 分离进程的限制）。必须放在 is_running 判断之前。
+    if [ "${VTOOLBOX_DRY_RUN:-}" = "1" ]; then
+        local dry_py dry_ff
+        dry_py="$(find_python)"
+        dry_ff="$(find_ffmpeg)"
+        if [ -z "${dry_py}" ] || [ -z "${dry_ff}" ]; then
+            echo "dry-run 失败：python3 或 ffmpeg 不可用" >&2
+            return 1
+        fi
+        printf '%s\n' \
+            "${dry_py}" \
+            "${APP_DIR}/server/main.py" \
+            "--www" "${APP_DIR}/www" \
+            "--bin" "${APP_DIR}/bin" \
+            "--var" "${VAR_DIR}" \
+            "--etc" "${ETC_DIR}" \
+            "--tmp" "${TMP_DIR}" \
+            "--port" "${PORT}" \
+            "--sock" "${SOCK_FILE}"
+        return 0
+    fi
+
+    if is_running; then
+        return 0
+    fi
+
+    local py
+    py="$(find_python)"
+    if [ -z "${py}" ]; then
+        echo "未找到 python3，无法启动视频工具箱。" >&2
+        if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+            echo "未找到 python3（需 /usr/bin/python3）。请在 fnOS 上安装 python3 后重试。" > "${TRIM_TEMP_LOGFILE}"
+        fi
+        return 1
+    fi
+
+    local ff
+    ff="$(find_ffmpeg)"
+    if [ -z "${ff}" ]; then
+        echo "未找到可用的 ffmpeg（内置与系统都没有）。" >&2
+        if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+            echo "未找到可用的 ffmpeg：应用内置 ${APP_DIR}/bin/ffmpeg 缺失，系统也未安装 ffmpeg。请重新安装应用。" > "${TRIM_TEMP_LOGFILE}"
+        fi
+        return 1
+    fi
+
+    # 统一网关 socket 必须在 ${APP_DIR} 下创建；若该目录对运行用户不可写，
+    # 尽最大努力修复（只影响应用自己的目录），否则公网/网关访问会不可用。
+    if ! touch "${SOCK_FILE}.probe" 2>/dev/null; then
+        chmod 0777 "${APP_DIR}" 2>/dev/null || true
+    fi
+    rm -f "${SOCK_FILE}.probe" 2>/dev/null || true
+    rm -f "${SOCK_FILE}" "${PID_FILE}"
+
+    nohup "${py}" "${APP_DIR}/server/main.py" \
+        --www "${APP_DIR}/www" \
+        --bin "${APP_DIR}/bin" \
+        --var "${VAR_DIR}" \
+        --etc "${ETC_DIR}" \
+        --tmp "${TMP_DIR}" \
+        --port "${PORT}" \
+        --sock "${SOCK_FILE}" \
+        >> "${LOG_FILE}" 2>&1 &
+
+    local pid=$!
+    printf "%s" "${pid}" > "${PID_FILE}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] start pid=${pid} python=${py} ffmpeg=${ff}" >> "${LOG_FILE}"
+
+    local i=0
+    while [ "${i}" -lt 15 ]; do
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            rm -f "${PID_FILE}"
+            echo "视频工具箱启动失败，请查看 ${LOG_FILE}" >&2
+            return 1
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+
+    return 0
+}
+
+stop_app() {
+    local pid
+    pid="$(current_pid)"
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+        kill -TERM "${pid}" 2>/dev/null
+        local i=0
+        while kill -0 "${pid}" 2>/dev/null && [ "${i}" -lt 10 ]; do
+            sleep 1
+            i=$((i + 1))
+        done
+        if kill -0 "${pid}" 2>/dev/null; then
+            kill -KILL "${pid}" 2>/dev/null
+        fi
+    fi
+    # 进程被强杀时不会走服务端的 server_close()，这里兜底清理网关 socket，
+    # 否则残留的 socket 文件会让下次启动或网关转发失败。
+    rm -f "${PID_FILE}" "${SOCK_FILE}" 2>/dev/null || true
+    return 0
+}
+
+case "$1" in
+start)
+    start_app
+    exit $?
+    ;;
+stop)
+    stop_app
+    exit $?
+    ;;
+status)
+    if is_running; then
+        exit 0
+    fi
+    exit 3
+    ;;
+*)
+    exit 1
+    ;;
+esac
